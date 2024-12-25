@@ -1,7 +1,7 @@
 import os
 import logging
 from utils_az_books import parse_args, weight_init
-from dataset_az_books import MatchDataset, data_collator_fn, data_collator_ccgnn
+from dataset_az_books import MatchDataset, data_collator_fn
 from transformers import set_seed
 from models_az_books import MIND, DSSM, GRU4Rec, SASRec, SDM
 from trainer import Trainer
@@ -37,16 +37,13 @@ def main(args):
         args.llm_embeds = match_dataset.llm_embeds
         args.llm_embed_dim = match_dataset.llm_embed_dim
 
-    if args.plus_ccgnn_embed:
-        args.num_genres = match_dataset.num_genres
-
     if args.plus_gnn_embed:
         args.u_code_num = match_dataset.u_code_num
         args.i_code_num = match_dataset.i_code_num
 
     datasets = {split: match_dataset.get_splited_dataset(split) for split in ["train", "valid", "test"]}
 
-    if args.plus_gnn_embed or args.plus_lightgcn_embed:
+    if args.plus_gnn_embed:
         args.i_graphs = dgl.batch(datasets["train"].i_graphs).to("cuda")
         datasets["valid"].i_graphs = datasets["train"].i_graphs
         datasets["test"].i_graphs = datasets["train"].i_graphs
@@ -67,7 +64,7 @@ def main(args):
     model.apply(weight_init)
 
 
-    collator = data_collator_ccgnn if args.plus_ccgnn_embed or args.plus_topoI2I_embed else data_collator_fn
+    collator = data_collator_fn
 
     trainer = Trainer(
         model=model, 
