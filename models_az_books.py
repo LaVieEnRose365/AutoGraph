@@ -46,131 +46,6 @@ class MatchModel(nn.Module):
             self.user_llm_mlp = nn.Linear(config.llm_embed_dim, config.embed_size)
             self.item_llm_mlp = nn.Linear(config.llm_embed_dim, config.embed_size)
 
-        if self.config.plus_lightgcn_embed:
-            self.lightgcn_embed = nn.ModuleDict({
-                # "user_u": nn.Embedding(config.num_users, config.embed_size),
-                # "item_u": nn.Embedding(config.num_items, config.embed_size),
-                "user": nn.Embedding(config.num_users + 1, config.embed_size, padding_idx=config.num_users),
-                "item": nn.Embedding(config.num_items, config.embed_size)
-            })
-
-            self.lightgcn_u = dglnn.GraphConv(config.embed_size, config.embed_size, weight=True, bias=True, allow_zero_in_degree=True)
-            self.lightgcn_i = dglnn.GraphConv(config.embed_size, config.embed_size, weight=True, bias=True, allow_zero_in_degree=True)
-
-        if self.config.plus_topoI2I_embed:
-            self.topoI2I_embed = nn.ModuleDict({
-                "user_u": nn.Embedding(config.num_users, config.embed_size),
-                "item_u": nn.Embedding(config.num_items, config.embed_size),
-                "item_i": nn.Embedding(config.num_items, config.embed_size)
-            })
-
-            self.topoI2I_i = dglnn.GATConv(config.embed_size, config.embed_size, num_heads=config.num_heads, allow_zero_in_degree=True)
-            self.topoI2I_u = {
-                ("item", "similar_to", "item"):
-                    dglnn.GATConv(
-                        (config.embed_size, config.embed_size),
-                        config.gnn_hidden_size,
-                        num_heads=config.num_heads,
-                        allow_zero_in_degree=True
-                    ),
-                ("item", "clicked_by", "user"):
-                    dglnn.GATConv(
-                        (config.gnn_hidden_size * config.num_heads + config.embed_size, config.embed_size),
-                        config.embed_size,
-                        num_heads=config.num_heads,
-                        allow_zero_in_degree=True
-                    )
-            }
-
-            for relation in self.topoI2I_u:
-                self.topoI2I_u[relation] = self.topoI2I_u[relation].cuda()
-
-            self.topoI2I_mlp = nn.ModuleDict({
-                "user": nn.Sequential(
-                    nn.Linear(config.embed_size * config.num_heads, config.embed_size),
-                    nn.ReLU(),
-                    nn.Dropout(0.1)
-                ),
-                "item": nn.Sequential(
-                    nn.Linear(config.embed_size * config.num_heads, config.embed_size),
-                    nn.ReLU(),
-                    nn.Dropout(0.1)
-                )
-            })
-
-        if self.config.plus_ccgnn_embed:
-            self.ccgnn_embed = nn.ModuleDict({
-                "user": nn.Embedding(config.num_users, config.embed_size),
-                "item_u": nn.Embedding(config.num_items, config.embed_size),
-                "item_i": nn.Embedding(config.num_items, config.embed_size),
-                "genre_u": nn.Embedding(config.num_genres, config.embed_size),
-                "genre_i": nn.Embedding(config.num_genres, config.embed_size)
-            })
-
-            self.ccgnn_u = {
-                ("item", "belongs_to", "genre"): 
-                    dglnn.GATConv(
-                        (config.embed_size, config.embed_size),
-                        config.gnn_hidden_size,
-                        num_heads=config.num_heads,
-                        allow_zero_in_degree=True
-                    ),
-
-                ("genre", "contains", "item"): 
-                    dglnn.GATConv(
-                        (config.gnn_hidden_size * config.num_heads + config.embed_size, config.gnn_hidden_size),
-                        config.gnn_hidden_size,
-                        num_heads=config.num_heads,
-                        allow_zero_in_degree=True
-                    ),
-
-                ("item", "clicked_by", "user"):
-                    dglnn.GATConv(
-                        (config.gnn_hidden_size * config.num_heads + config.embed_size, config.embed_size),
-                        config.embed_size,
-                        num_heads=config.num_heads,
-                        allow_zero_in_degree=True
-                    )
-            }
-
-            self.ccgnn_i = {
-                ("item", "belongs_to", "genre"):
-                    dglnn.GATConv(
-                        (config.embed_size, config.embed_size),
-                        config.gnn_hidden_size,
-                        num_heads=config.num_heads,
-                        allow_zero_in_degree=True
-                    ),
-                ("genre", "contains", "item"):
-                    dglnn.GATConv(
-                        (config.gnn_hidden_size * config.num_heads + config.embed_size, config.gnn_hidden_size),
-                        config.embed_size,
-                        num_heads=config.num_heads,
-                        allow_zero_in_degree=True
-                    )
-            }
-
-            self.ccgnn_mlp = nn.ModuleDict({
-                "user": nn.Sequential(
-                    nn.Linear(config.embed_size * config.num_heads, config.embed_size),
-                    nn.ReLU(),
-                    nn.Dropout(0.1)
-                ),
-                "item": nn.Sequential(
-                    nn.Linear(config.embed_size * config.num_heads, config.embed_size),
-                    nn.ReLU(),
-                    nn.Dropout(0.1)
-                )
-            })
-
-            
-            for relation in self.ccgnn_u:
-                self.ccgnn_u[relation] = self.ccgnn_u[relation].cuda()
-            
-            for relation in self.ccgnn_i:
-                self.ccgnn_i[relation] = self.ccgnn_i[relation].cuda()
-
-
         if self.config.plus_gnn_embed:
             self.user_embed = nn.Embedding(config.num_users + 1, config.embed_size, padding_idx=config.num_users)
             self.item_embed = nn.Embedding(config.num_items, config.embed_size)
@@ -364,78 +239,7 @@ class MatchModel(nn.Module):
         h = h[g.nodes["item"].data["mask"].bool()]
         h = self.item_gnn_mapping(h)
         return h
-
-
-    def ccgnn_i_graph_propagation(self, g):
-        item_emb = self.ccgnn_embed["item_i"](g.nodes["item"].data["id"])
-        genre_emb = self.ccgnn_embed["genre_i"](g.nodes["genre"].data["id"])
-
-        etype = ("item", "belongs_to", "genre")
-        i_n = self.ccgnn_i[etype](g.edge_type_subgraph([etype]), (item_emb, genre_emb)).flatten(-2)
-
-        etype = ("genre", "contains", "item")
-        h = self.ccgnn_i[etype](g.edge_type_subgraph([etype]), (torch.cat([i_n, genre_emb], dim=-1), item_emb)).flatten(-2)
-
-        h = self.ccgnn_mlp["item"](h)
-
-        return h
-
-
-    def ccgnn_u_graph_propagation(self, g):
-        user_emb = self.ccgnn_embed["user"](g.nodes["user"].data["id"])
-        item_emb = self.ccgnn_embed["item_u"](g.nodes["item"].data["id"])
-        genre_emb = self.ccgnn_embed["genre_u"](g.nodes["genre"].data["id"])
-
-        etype = ("item", "belongs_to", "genre")
-        i_n = self.ccgnn_u[etype](g.edge_type_subgraph([etype]), (item_emb, genre_emb)).flatten(-2)
-
-        etype = ("genre", "contains", "item")
-        h = self.ccgnn_u[etype](g.edge_type_subgraph([etype]), (torch.cat([i_n, genre_emb], dim=-1), item_emb)).flatten(-2)
-
-        etype = ("item", "clicked_by", "user")
-        h = self.ccgnn_u[etype](g.edge_type_subgraph([etype]), (torch.cat([h, item_emb], dim=-1), user_emb)).flatten(-2)
-
-        h = self.ccgnn_mlp["user"](h)
-
-        return h
-
-
-    def lightgcn_u_graph_propagation(self, g):
-        user_emb = self.lightgcn_embed["user"](g.nodes["user"].data["id"])
-        item_emb = self.lightgcn_embed["item"](g.nodes["item"].data["id"])
-
-        h = self.lightgcn_u(g, (item_emb, user_emb))
-        return h
-
-
-    def lightgcn_i_graph_propagation(self, g):
-        user_emb = self.lightgcn_embed["user"](g.nodes["user"].data["id"])
-        item_emb = self.lightgcn_embed["item"](g.nodes["item"].data["id"])
-
-        h = self.lightgcn_i(g, (user_emb, item_emb))
-        return h
-
-
-    def topoI2I_u_graph_propagation(self, g):
-        user_emb = self.topoI2I_embed["user_u"](g.nodes["user"].data["id"])
-        item_emb = self.topoI2I_embed["item_u"](g.nodes["item"].data["id"])
-
-        etype = ("item", "similar_to", "item")
-        i_n = self.topoI2I_u[etype](g.edge_type_subgraph([etype]), (item_emb, item_emb)).flatten(-2)
-
-        etype = ("item", "clicked_by", "user")
-        h = self.topoI2I_u[etype](g.edge_type_subgraph([etype]), (torch.cat([i_n, item_emb], dim=-1), user_emb)).flatten(-2)
-
-        h = self.topoI2I_mlp["user"](h)
-
-        return h
-
-    def topoI2I_i_graph_propagation(self, g):
-        item_emb = self.topoI2I_embed["item_i"].weight
-        h = self.topoI2I_i(g, item_emb).flatten(-2)
-        h = self.topoI2I_mlp["item"](h)
-        return h
-
+    
 
     def item_tower(self, pos_item_ids, neg_item_ids, **kwargs):
         """Get item ID embeddings."""
@@ -456,19 +260,6 @@ class MatchModel(nn.Module):
                 gnn_emb = gnn_emb.reshape(bs, item_ids.shape[1], self.config.embed_size)
                 emb = torch.cat([emb, gnn_emb.unsqueeze(2)], dim=2)
 
-            if self.config.plus_lightgcn_embed:
-                gnn_emb = self.lightgcn_i_graph_propagation(kwargs["i_graphs"])
-                gnn_emb = gnn_emb.reshape(bs, item_ids.shape[1], self.config.embed_size)
-                emb = torch.cat([emb, gnn_emb.unsqueeze(2)], dim=2)
-
-            if self.config.plus_topoI2I_embed:
-                gnn_emb = self.topoI2I_i_graph_propagation(kwargs["i_graphs"])[item_ids]
-                emb = torch.cat([emb, gnn_emb.unsqueeze(2)], dim=2)
-
-            if self.config.plus_ccgnn_embed:
-                ccgnn_emb = self.ccgnn_i_graph_propagation(kwargs["i_graphs"])[item_ids]
-                emb = torch.cat([emb, ccgnn_emb.unsqueeze(2)], dim=2)
-
             item_embed = self.item_mlp(emb.flatten(2))
             labels = torch.zeros(bs)
             return item_embed, labels
@@ -483,18 +274,6 @@ class MatchModel(nn.Module):
                 gnn_emb = self.i_graph_propagation(self.config.i_graphs).unsqueeze(0)
                 # gnn_emb = gnn_emb.reshape(bs, self.config.num_items, self.config.embed_size)                
                 item_feats_embed = torch.cat([item_feats_embed, gnn_emb.unsqueeze(2)], dim=2)
-
-            if self.config.plus_lightgcn_embed:
-                gnn_emb = self.lightgcn_i_graph_propagation(self.config.i_graphs).unsqueeze(0)
-                item_feats_embed = torch.cat([item_feats_embed, gnn_emb.unsqueeze(2)], dim=2)
-
-            if self.config.plus_ccgnn_embed:
-                ccgnn_emb = self.ccgnn_i_graph_propagation(kwargs["i_graphs"]).unsqueeze(0)
-                item_feats_embed = torch.cat([item_feats_embed, ccgnn_emb.unsqueeze(2)], dim=2)
-
-            if self.config.plus_topoI2I_embed:
-                topoI2I_emb = self.topoI2I_i_graph_propagation(kwargs["i_graphs"]).unsqueeze(0)
-                item_feats_embed = torch.cat([item_feats_embed, topoI2I_emb.unsqueeze(2)], dim=2)
 
             item_embed_pool = self.item_mlp(item_feats_embed.flatten(2))
             labels = pos_item_ids
@@ -532,18 +311,6 @@ class MatchModel(nn.Module):
         if self.config.plus_gnn_embed and not self.config.not_on_user:
             gnn_emb = self.u_graph_propagation(kwargs["u_graphs"]).unsqueeze(1)
             user_embed = torch.cat([user_embed, gnn_emb], dim=1)
-        
-        if self.config.plus_lightgcn_embed:
-            gnn_emb = self.lightgcn_u_graph_propagation(kwargs["u_graphs"])
-            user_embed = torch.cat([user_embed, gnn_emb.unsqueeze(1)], dim=1)
-
-        if self.config.plus_ccgnn_embed:
-            ccgnn_emb = self.ccgnn_u_graph_propagation(kwargs["u_graphs"]).unsqueeze(1)
-            user_embed = torch.cat([user_embed, ccgnn_emb], dim=1)
-        
-        if self.config.plus_topoI2I_embed:
-            topoI2I_emb = self.topoI2I_u_graph_propagation(kwargs["u_graphs"]).unsqueeze(1)
-            user_embed = torch.cat([user_embed, topoI2I_emb], dim=1)
 
         user_embed = self.hist_aggregation(user_embed, hist_embed, hist_mask)
         return user_embed
