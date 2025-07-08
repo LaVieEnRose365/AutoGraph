@@ -71,7 +71,7 @@ def BX_item_data(tokenizer, args):
     return inputs, start, end
 
 
-def ml25m_user_data(tokenizer, args):
+def ml1m_user_data(tokenizer, args):
     prompt = (
         "A user's movie viewing history over time is listed below: \n{user_hist}.\n"
         "Analyze the user's preferences on movies (consider factors like genre, director/actors, time "
@@ -104,7 +104,7 @@ def ml25m_user_data(tokenizer, args):
     return inputs, start, end
 
 
-def ml25m_item_data(tokenizer, args):
+def ml1m_item_data(tokenizer, args):
     prompt = (
         "Introduce movie {title} and describe its attributes (including but not limited to genre, "
         "director/cast, country, character, plot/theme, mood/tone, critical "
@@ -144,7 +144,7 @@ def az_user_data(tokenizer, args):
     )
 
     df = pd.read_parquet(os.path.join(args.data_dir, "valid.parquet.gz"))
-    title_dict = json.load(open("/NAS2020/Workspaces/DMGroup/rongshan/GNN_LLM/data/az-books/proc_data/datamaps.json"))["itemid2title"]
+    title_dict = json.load(open(f"{args.data_dir}/datamaps.json"))["itemid2title"]
     title_dict = {int(k): v for k, v in title_dict.items()}
 
     inputs = []
@@ -172,7 +172,7 @@ def az_item_data(tokenizer, args):
         "acclaim/award, production quality, and soundtrack)."
     )
 
-    title_dict = json.load(open("/NAS2020/Workspaces/DMGroup/rongshan/GNN_LLM/data/az-books/proc_data/datamaps.json"))["itemid2title"]
+    title_dict = json.load(open(f"{args.data_dir}/datamaps.json"))["itemid2title"]
     title_dict = {int(k): v for k, v in title_dict.items()}
 
     inputs = []
@@ -191,10 +191,6 @@ def az_item_data(tokenizer, args):
     return inputs, start, end
 
 
-
-
-
-
 def main(args):
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_path, 
@@ -211,33 +207,29 @@ def main(args):
         else:
             texts, start, end = BX_item_data(tokenizer, args)
 
-    elif args.dataset == "ml-25m":
+    elif args.dataset == "ml-1m":
         if args.part == "user":
-            texts, start, end = ml25m_user_data(tokenizer, args)
+            texts, start, end = ml1m_user_data(tokenizer, args)
         else:
-            texts, start, end = ml25m_item_data(tokenizer, args)
+            texts, start, end = ml1m_item_data(tokenizer, args)
     elif args.dataset == "az-books":
         if args.part == "user":
             texts, start, end = az_user_data(tokenizer, args)
         else:
             texts, start, end = az_item_data(tokenizer, args)
 
+    prompt_path = f"{args.embed_dir}/{args.dataset}/prompt_{args.part}.json"
+    json.dump(generated_texts, open(prompt_path, "w"), indent=2)
     texts = texts[start:end]
+
     print(texts[0])
-    exit()
     print(f"Data prepared, range {start}:{end}.")
 
-    # terminators = [
-    #     tokenizer.eos_token_id,
-    #     tokenizer.convert_tokens_to_ids("<|eot_id|>")
-    # ]
 
-    # sampling_params = SamplingParams(temperature=0.9, top_p=0.6, max_tokens=args.max_tokens, stop_token_ids=terminators)
     sampling_params = SamplingParams(temperature=0.9, top_p=0.6, max_tokens=args.max_tokens)
 
     generated_texts = []
     saved_groups = 0
-    group_lens = 5120 * 2
 
     for i in trange(0, len(texts), args.batch_size):
         outputs = llm.generate(texts[i:i+args.batch_size], sampling_params, use_tqdm=False)
@@ -245,30 +237,31 @@ def main(args):
         for output in outputs:
             generated_texts.append(output.outputs[0].text)
 
-        if len(generated_texts) == group_lens:
-            cur_start = start + saved_groups * group_lens
-            cur_end = cur_start + group_lens
-            output_path = f"{args.embed_dir}/{args.dataset}/txt_{args.part}_{cur_start}_{cur_end}.json"
+        if len(generated_texts) == args.group_lens:
+            cur_start = start + saved_groups * args.group_lens
+            cur_end = cur_start + args.group_lens
+            output_path = f"{args.embed_dir}/{args.dataset}/klg_{args.part}_{cur_start}_{cur_end}.json"
             json.dump(generated_texts, open(output_path, "w"), indent=2)
             generated_texts = []
             saved_groups += 1
     
     if len(generated_texts) != 0:
-        output_path = f"{args.embed_dir}/{args.dataset}/txt_{args.part}_{cur_end}_{end}.json"
+        output_path = f"{args.embed_dir}/{args.dataset}/klg_{args.part}_{cur_end}_{end}.json"
         json.dump(generated_texts, open(output_path, "w"), indent=2)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", type=str)
-    parser.add_argument("--embed_dir", type=str, default="../outputs_llm")
-    parser.add_argument("--model_path", type=str)
+    parser.add_argument("--data_dir", type=str, default="data/ml-1m/proc_data")
+    parser.add_argument("--embed_dir", type=str, default="outputs_llm")
+    parser.add_argument("--model_path", type=str, default="vicuna-7b-v1.5")
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--part", type=str, default="item")
     parser.add_argument("--max_tokens", type=int, default=2048)
     parser.add_argument("--num_gpus", type=int, default=1)
     parser.add_argument("--split", type=str, default="0:")
     parser.add_argument("--gpu_ratio", type=float, default=0.9)
+    parser.add_argument("--group_lens", type=int, default=1000)
     args = parser.parse_args()
 
     args.dataset = args.data_dir.split("/")[-2]
